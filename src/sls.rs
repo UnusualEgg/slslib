@@ -853,6 +853,44 @@ pub struct Header {
     //circ_type: CircuitType,
 }
 
+struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+struct ColorVisitor;
+impl<'de> Visitor<'de> for ColorVisitor {
+    type Value = Color;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("Color String")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        match v.strip_prefix("#") {
+            None => return Err(de::Error::custom("expected color to start with #")),
+            Some(v) => {
+                let mut iter = v.chars();
+                let r = [
+                    match iter.next() {
+                        None => return Err(de::Error::custom("expected color to start with #")),
+                        Some(c)=>c,
+                    }),
+                    match iter.next() {
+                        None => return Err(de::Error::custom("expected color to start with #")),
+                        Some(c)=>c,
+                    }),
+                ]
+                .concat();
+            }
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct Circuit {
@@ -873,6 +911,7 @@ pub struct Circuit {
     wires: Vec<Wire>,
     #[serde(skip)]
     begin: Option<Instant>,
+    color: Color,
 }
 impl Circuit {
     pub fn new(name: String, id: String, components: Vec<Component>, wires: Vec<Wire>) -> Self {
