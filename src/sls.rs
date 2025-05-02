@@ -119,11 +119,11 @@ pub struct Input {
     #[serde(skip, default)]
     pub other_output: ComponentRef<bool>,
     #[serde(rename = "OTHER_CONNECTOR_ID")]
-    other_pin: usize,
+    pub other_pin: usize,
     #[serde(rename = "OTHER_COMPONENT")]
-    other_id: ID,
+    pub other_id: ID,
     #[serde(rename = "CONNECTOR_ID")]
-    in_pin: usize,
+    pub in_pin: usize,
 }
 impl Debug for Input {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
