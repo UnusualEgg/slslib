@@ -54,6 +54,11 @@ pub enum NodeType {
     SEVEN_SEGMENT_DISPLAY_DECODER,
     INTEGRATED_CIRCUIT,
 }
+impl fmt::Display for NodeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
 
 #[derive(PartialEq, Clone, Debug, Eq, Hash, Default)]
 pub struct ID(pub String);
@@ -248,6 +253,8 @@ pub struct Component {
     num_of_out: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>, //used for NodeType::NOTE
 
     #[serde(skip)]
     pub ic_instance: Option<Circuit>,
@@ -292,6 +299,9 @@ impl Component {
         for comp in &mut new.components {
             comp.outputs = Rc::new(RefCell::new(Vec::new()));
         }
+        if self.label.is_none() {
+            self.label = Some(new.header.name.clone());
+        }
         self.ic_instance = Some(new);
         //no idea if this makes a difference
         self.ic_instance
@@ -311,7 +321,13 @@ impl Component {
                     NodeType::DEMUX => self.size.expect("size of demux"),
                     NodeType::HALF_ADDER | NodeType::FULL_ADDER => 2,
                     NodeType::SEVEN_SEGMENT_DISPLAY_DECODER => 7,
-                    NodeType::SEVEN_SEGMENT_DISPLAY => 0,
+                    NodeType::SEVEN_SEGMENT_DISPLAY
+                    | NodeType::NOTE
+                    | NodeType::DOT_MATRIX_DISPLAY_5X7
+                    | NodeType::FLASHLIGHT
+                    | NodeType::NOTIFICATION_LED
+                    | NodeType::VIBRATION
+                    | NodeType::RGB_LIGHT => 0,
                     //Q ~Q
                     NodeType::D_FLIP_FLOP
                     | NodeType::SR_LATCH
@@ -848,15 +864,43 @@ pub struct Header {
     app_version: usize,
     #[serde(default)]
     pub id: ID,
+    pub color: Option<Color>,
     //not in latest version
     //#[serde(rename = "TYPE", default, skip_serializing)]
     //circ_type: CircuitType,
 }
 
-struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
+#[derive(Default, Clone, Copy)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+impl Debug for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_string())
+    }
+}
+impl ToString for Color {
+    fn to_string(&self) -> String {
+        format!("#{:x}{:x}{:x}", self.r, self.g, self.b)
+    }
+}
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(ColorVisitor)
+    }
+}
+impl Serialize for Color {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 struct ColorVisitor;
@@ -874,18 +918,21 @@ impl<'de> Visitor<'de> for ColorVisitor {
         match v.strip_prefix("#") {
             None => return Err(de::Error::custom("expected color to start with #")),
             Some(v) => {
-                let mut iter = v.chars();
-                let r = [
-                    match iter.next() {
-                        None => return Err(de::Error::custom("expected color to start with #")),
-                        Some(c)=>c,
-                    }),
-                    match iter.next() {
-                        None => return Err(de::Error::custom("expected color to start with #")),
-                        Some(c)=>c,
-                    }),
-                ]
-                .concat();
+                if v.len() != 6 {
+                    return Err(de::Error::custom(format!(
+                        "Color doesn't have 6 digits: \"{}\"",
+                        v
+                    )));
+                }
+                let color_num: u32 = match u32::from_str_radix(v, 16) {
+                    Ok(v) => v,
+                    Err(e) => return Err(de::Error::custom(e)),
+                };
+                Ok(Color {
+                    r: (color_num >> (8 * 2)) as u8,
+                    g: (color_num >> (8 * 1)) as u8,
+                    b: (color_num >> (8 * 0)) as u8,
+                })
             }
         }
     }
@@ -911,15 +958,21 @@ pub struct Circuit {
     wires: Vec<Wire>,
     #[serde(skip)]
     begin: Option<Instant>,
-    color: Color,
 }
 impl Circuit {
-    pub fn new(name: String, id: String, components: Vec<Component>, wires: Vec<Wire>) -> Self {
+    pub fn new(
+        name: String,
+        id: String,
+        components: Vec<Component>,
+        wires: Vec<Wire>,
+        color: Option<Color>,
+    ) -> Self {
         Circuit {
             header: Header {
                 name,
                 app_version: 158,
                 id: ID(id),
+                color,
             },
             components,
             wires,
