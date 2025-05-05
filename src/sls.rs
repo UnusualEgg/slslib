@@ -385,9 +385,8 @@ impl Component {
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
-            let instance = &mut self.ic_instance.as_mut().unwrap();
-            let iter = instance.components.iter_mut();
-            for comp in iter {
+            let instance: &mut Circuit = self.ic_instance.as_mut().unwrap();
+            for comp in &mut instance.components {
                 comp.get_inputs()?
             }
         }
