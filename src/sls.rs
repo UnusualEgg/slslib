@@ -887,7 +887,7 @@ impl Debug for Color {
 }
 impl ToString for Color {
     fn to_string(&self) -> String {
-        format!("#{:x}{:x}{:x}", self.r, self.g, self.b)
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
 }
 impl<'de> Deserialize<'de> for Color {
