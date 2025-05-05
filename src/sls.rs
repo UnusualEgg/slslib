@@ -1,12 +1,11 @@
 #![deny(unused_must_use)]
 use core::panic;
+use std::mem::MaybeUninit;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
 use std::str::FromStr;
 use std::time::Instant;
 use std::usize;
@@ -150,9 +149,6 @@ impl Debug for Input {
     }
 }
 
-fn default_outputs() -> Rc<RefCell<Vec<bool>>> {
-    return Rc::new(RefCell::new(Vec::new()));
-}
 fn u64_iszero(num: &u64) -> bool {
     num == &0
 }
@@ -182,10 +178,14 @@ impl std::fmt::Display for NodeError {
     }
 }
 impl std::error::Error for NodeError {}
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ComponentRef<T: Clone> {
-    pub weak: Weak<RefCell<Vec<T>>>,
-    pub index: usize,
+    pub ptr: MaybeUninit<*const T>,
+}
+impl<T:Clone> Default for ComponentRef<T> {
+    fn default() -> Self {
+        Self {ptr:MaybeUninit::uninit()}
+    }
 }
 
 #[derive(Debug)]
@@ -200,17 +200,20 @@ impl std::fmt::Display for ComponentInputError {
     }
 }
 impl<T: std::clone::Clone> ComponentRef<T> {
-    pub fn new(weak: Weak<RefCell<Vec<T>>>, index: usize) -> Self {
-        Self { weak, index }
+    pub fn new(ptr:*const T) -> Self {
+        Self { ptr:MaybeUninit::new(ptr) }
     }
     pub fn get(&self) -> Result<T, ComponentInputError> {
-        match self.weak.upgrade() {
-            None => Err(ComponentInputError::ComponentNotExit),
-            Some(v) => match v.borrow().get(self.index) {
-                None => Err(ComponentInputError::IndexError(self.index)),
-                Some(b) => Ok(b.clone()),
-            },
-        }
+        let ptr = unsafe{self.ptr.assume_init()};
+        let val: T = unsafe{&*ptr}.clone();
+        Ok(val)
+        //match self.weak.upgrade() {
+        //    None => Err(ComponentInputError::ComponentNotExit),
+        //    Some(v) => match v.borrow().get(self.index) {
+        //        None => Err(ComponentInputError::IndexError(self.index)),
+        //        Some(b) => Ok(b.clone()),
+        //    },
+        //}
     }
 }
 
@@ -225,8 +228,8 @@ pub struct Component {
     //gets from inputs. Used for easier processing.
     #[serde(skip)]
     pub input_states: Vec<InputState>,
-    #[serde(skip, default = "default_outputs")]
-    pub outputs: Rc<RefCell<Vec<bool>>>,
+    #[serde(skip, default)]
+    pub outputs: Vec<bool>,
     #[serde(skip)]
     pub next_outputs: Vec<bool>,
     #[serde(skip, default)]
@@ -290,7 +293,7 @@ impl Component {
         let original = &dependencies[cid];
         let mut new = original.clone();
         for comp in &mut new.components {
-            comp.outputs = Rc::new(RefCell::new(Vec::new()));
+            comp.outputs = Vec::new();
         }
         self.ic_instance = Some(new);
         //no idea if this makes a difference
@@ -299,6 +302,7 @@ impl Component {
             .unwrap()
             .init_ic(dependencies, deps_path);
     }
+    //call connect AFTER
     fn resize_output(&mut self) {
         let output_n = match self.num_of_out {
             Some(n) => n,
@@ -322,7 +326,7 @@ impl Component {
                 }
             }
         };
-        let mut outputs = self.outputs.borrow_mut();
+        let outputs = &mut self.outputs;
         outputs.resize(output_n, false);
         self.next_outputs.resize(output_n, false);
         match self.node_type {
@@ -707,7 +711,7 @@ impl Component {
     }
     fn update_output(&mut self) {
         //self.outputs.borrow_mut().clone_from(&self.next_outputs);
-        let mut outputs = self.outputs.borrow_mut();
+        let outputs = &mut self.outputs;
         for (i, output) in self.next_outputs.iter().enumerate() {
             outputs[i] = *output;
         }
@@ -959,8 +963,8 @@ impl Circuit {
         //println!("components: {:?}", (&self.components).as_ptr());
         //so the components are different
         //how are the outputs or inputs copied to the next IC?
-        for comp in &self.components {
-            ids.insert(comp.id.clone(), Rc::downgrade(&comp.outputs));
+        for comp in self.components.iter() {
+            ids.insert(comp.id.clone(), (&comp.outputs) as *const Vec<bool>);
         }
         //for (id, r) in &ids {
         //    println!("{}: {:#?}", id.0, r.upgrade().unwrap().as_ptr());
@@ -977,8 +981,7 @@ impl Circuit {
                 .unwrap();
             comp.inputs.push(Input {
                 other_output: ComponentRef::new(
-                    ids.get(&wire.from.0).unwrap().clone(),
-                    wire.from.1,
+                    &(unsafe{&**ids.get(&wire.from.0).unwrap()}[wire.from.1])
                 ),
                 other_pin: wire.from.1,
                 other_id: wire.from.0.clone(),
