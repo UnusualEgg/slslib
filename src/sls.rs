@@ -1110,6 +1110,18 @@ impl Circuit {
         let avg_mspt = passed.as_millis() / self.tick_count as u128;
         return avg_mspt;
     }
+    fn check_circular(&self,comp:&Component,original_id:&ID,num_iters:usize) -> bool{
+        //check circular input
+        for input in &comp.inputs {
+            if input.other_id==comp.id||&input.other_id==original_id {
+                return true;
+            }
+            if num_iters>0 {
+                self.check_circular(&self.dependencies[&input.other_id], original_id, num_iters);
+            }
+        }
+        return false;
+    }
     pub fn init_circ(&mut self, deps_path: Option<&Path>) {
         //add depependencies
         //go thru URIs.json and add each one to dependencies that we need
@@ -1128,6 +1140,12 @@ impl Circuit {
                 NodeType::CLOCK => {
                     self.has_dynamic = true;
                     break;
+                }
+                NodeType::INTEGRATED_CIRCUIT => {
+                    if comp.ic_instance.as_ref().unwrap().has_dynamic {
+                        self.has_dynamic=true;
+                        break;
+                    }
                 }
                 _ => (),
             }
