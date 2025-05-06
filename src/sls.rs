@@ -971,7 +971,7 @@ pub struct Circuit {
     #[serde(default)]
     wires: Vec<Wire>,
     #[serde(skip)]
-    begin: Option<Instant>,
+    pub begin: Option<Instant>,
     //components that change outputs
     //even when inputs haven't changed
     #[serde(skip)]
