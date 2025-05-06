@@ -1,5 +1,6 @@
 #![deny(unused_must_use)]
 use core::panic;
+use std::borrow::Borrow;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
@@ -59,8 +60,13 @@ impl fmt::Display for NodeType {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Eq, Hash, Default)]
+#[derive(PartialEq, Clone, Debug, Eq, Hash, Default,Ord,PartialOrd)]
 pub struct ID(pub String);
+impl Borrow<str> for ID {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
 impl Serialize for ID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
