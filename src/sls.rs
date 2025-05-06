@@ -1,10 +1,10 @@
 #![deny(unused_must_use)]
 use core::panic;
-use std::mem::MaybeUninit;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::fs::File;
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
@@ -187,9 +187,11 @@ impl std::error::Error for NodeError {}
 pub struct ComponentRef<T: Clone> {
     pub ptr: MaybeUninit<*const T>,
 }
-impl<T:Clone> Default for ComponentRef<T> {
+impl<T: Clone> Default for ComponentRef<T> {
     fn default() -> Self {
-        Self {ptr:MaybeUninit::uninit()}
+        Self {
+            ptr: MaybeUninit::uninit(),
+        }
     }
 }
 
@@ -205,12 +207,14 @@ impl std::fmt::Display for ComponentInputError {
     }
 }
 impl<T: std::clone::Clone> ComponentRef<T> {
-    pub fn new(ptr:*const T) -> Self {
-        Self { ptr:MaybeUninit::new(ptr) }
+    pub fn new(ptr: *const T) -> Self {
+        Self {
+            ptr: MaybeUninit::new(ptr),
+        }
     }
     pub fn get(&self) -> Result<T, ComponentInputError> {
-        let ptr = unsafe{self.ptr.assume_init()};
-        let val: T = unsafe{&*ptr}.clone();
+        let ptr = unsafe { self.ptr.assume_init() };
+        let val: T = unsafe { &*ptr }.clone();
         Ok(val)
         //match self.weak.upgrade() {
         //    None => Err(ComponentInputError::ComponentNotExit),
@@ -377,20 +381,27 @@ impl Component {
             }),
         }
     }
-    fn get_inputs(&mut self) -> Result<(), NodeError> {
+    //returns true if any inputs changed
+    fn get_inputs(&mut self) -> Result<bool, NodeError> {
+        let mut changed: bool = false;
         for (i, input) in self.inputs.iter().enumerate() {
-            self.input_states[i] = InputState {
-                in_pin: input.in_pin,
-                state: self.get_input(input)?,
+            let state = self.get_input(input)?;
+            let input_state = &mut self.input_states[i];
+            if state !=input_state.state {
+                changed = true;
+                input_state.in_pin=input.in_pin;
+                input_state.state=state;
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
             let instance: &mut Circuit = self.ic_instance.as_mut().unwrap();
-            for comp in &mut instance.components {
-                comp.get_inputs()?
+            if instance.has_dynamic || changed {
+                for comp in &mut instance.components {
+                    comp.get_inputs()?;
+                }
             }
         }
-        Ok(())
+        Ok(changed)
     }
     fn next_output(&mut self, tick: u64) {
         match &self.node_type {
@@ -961,6 +972,10 @@ pub struct Circuit {
     wires: Vec<Wire>,
     #[serde(skip)]
     begin: Option<Instant>,
+    //components that change outputs
+    //even when inputs haven't changed
+    #[serde(skip)]
+    has_dynamic: bool,
 }
 impl Circuit {
     pub fn new(
@@ -1072,7 +1087,7 @@ impl Circuit {
                 .unwrap();
             comp.inputs.push(Input {
                 other_output: ComponentRef::new(
-                    &(unsafe{&**ids.get(&wire.from.0).unwrap()}[wire.from.1])
+                    &(unsafe { &**ids.get(&wire.from.0).unwrap() }[wire.from.1]),
                 ),
                 other_pin: wire.from.1,
                 other_id: wire.from.0.clone(),
@@ -1108,6 +1123,15 @@ impl Circuit {
         {
             comp.set_instance(&self.dependencies, deps_path);
         }
+        for comp in &self.components {
+            match comp.node_type {
+                NodeType::CLOCK => {
+                    self.has_dynamic = true;
+                    break;
+                }
+                _ => (),
+            }
+        }
         //coonnect components
         self.connect();
         //println!("wires: {:?}", self.wires);
@@ -1133,20 +1157,29 @@ impl Circuit {
     //1 tick = 100 ms
     pub fn tick(&mut self) {
         for i in 0..self.components.len() {
-            if let Err(e) = self.components[i].get_inputs() {
-                eprintln!("Input Error!");
-                match &e.t {
-                    NodeErrorType::Input(i, id) => {
-                        if let Some(c) = self.components.iter().find(|c| &c.id == id) {
-                            eprintln!("other: {} {:?} {:?}: {}", &c.id.0, c.label, c.node_type, i);
-                        } else {
-                            eprintln!("couldn't get other component with id: {}: {}", &id.0, i);
+            match self.components[i].get_inputs() {
+                Err(e) => {
+                    eprintln!("Input Error!");
+                    match &e.t {
+                        NodeErrorType::Input(i, id) => {
+                            if let Some(c) = self.components.iter().find(|c| &c.id == id) {
+                                eprintln!(
+                                    "other: {} {:?} {:?}: {}",
+                                    &c.id.0, c.label, c.node_type, i
+                                );
+                            } else {
+                                eprintln!("couldn't get other component with id: {}: {}", &id.0, i);
+                            }
                         }
                     }
+                    panic!("{}", e);
                 }
-                panic!("{}", e);
+                Ok(b) => {
+                    if self.has_dynamic || b {
+                        self.components[i].next_output(self.tick_count);
+                    }
+                }
             }
-            self.components[i].next_output(self.tick_count);
         }
         for component in &mut self.components {
             component.update_output();
