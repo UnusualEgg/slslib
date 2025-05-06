@@ -1,7 +1,7 @@
 #![deny(unused_must_use)]
 use core::panic;
-use std::borrow::Borrow;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::fs::File;
@@ -60,7 +60,7 @@ impl fmt::Display for NodeType {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Eq, Hash, Default,Ord,PartialOrd)]
+#[derive(PartialEq, Clone, Debug, Eq, Hash, Default, Ord, PartialOrd)]
 pub struct ID(pub String);
 impl Borrow<str> for ID {
     fn borrow(&self) -> &str {
@@ -393,10 +393,10 @@ impl Component {
         for (i, input) in self.inputs.iter().enumerate() {
             let state = self.get_input(input)?;
             let input_state = &mut self.input_states[i];
-            if state !=input_state.state {
+            if state != input_state.state {
                 changed = true;
-                input_state.in_pin=input.in_pin;
-                input_state.state=state;
+                input_state.in_pin = input.in_pin;
+                input_state.state = state;
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
@@ -1109,6 +1109,31 @@ impl Circuit {
             //);
         }
     }
+    fn check_dynamic(&mut self) {
+        for comp in &mut self.components {
+            match comp.node_type {
+                NodeType::CLOCK => {
+                    self.has_dynamic = true;
+                    return;
+                }
+                NodeType::INTEGRATED_CIRCUIT => {
+                    let instance = comp.ic_instance.as_mut().unwrap();
+                    instance.check_dynamic();
+                    if instance.has_dynamic {
+                        self.has_dynamic = true;
+                        return;
+                    }
+                }
+                _ => (),
+            }
+        }
+        for comp in &self.components {
+            if self.check_circular(comp, comp.get_id(), 2) {
+                self.has_dynamic = true;
+                return;
+            }
+        }
+    }
     pub fn get_speed(&self) -> u128 {
         //use begin and tick_count
         let now = Instant::now();
@@ -1116,14 +1141,24 @@ impl Circuit {
         let avg_mspt = passed.as_millis() / self.tick_count as u128;
         return avg_mspt;
     }
-    fn check_circular(&self,comp:&Component,original_id:&ID,num_iters:usize) -> bool{
+    fn check_circular(&self, comp: &Component, original_id: &ID, num_iters: usize) -> bool {
         //check circular input
         for input in &comp.inputs {
-            if input.other_id==comp.id||&input.other_id==original_id {
+            if input.other_id == comp.id || &input.other_id == original_id {
                 return true;
             }
-            if num_iters>0 {
-                self.check_circular(&self.dependencies[&input.other_id], original_id, num_iters);
+            if num_iters > 0 {
+                if self.check_circular(
+                    &self
+                        .components
+                        .iter()
+                        .find(|c| c.get_id() == &input.other_id)
+                        .unwrap(),
+                    original_id,
+                    num_iters - 1,
+                ) {
+                    return true;
+                }
             }
         }
         return false;
@@ -1141,21 +1176,7 @@ impl Circuit {
         {
             comp.set_instance(&self.dependencies, deps_path);
         }
-        for comp in &self.components {
-            match comp.node_type {
-                NodeType::CLOCK => {
-                    self.has_dynamic = true;
-                    break;
-                }
-                NodeType::INTEGRATED_CIRCUIT => {
-                    if comp.ic_instance.as_ref().unwrap().has_dynamic {
-                        self.has_dynamic=true;
-                        break;
-                    }
-                }
-                _ => (),
-            }
-        }
+        self.check_dynamic();
         //coonnect components
         self.connect();
         //println!("wires: {:?}", self.wires);
