@@ -5,6 +5,7 @@ use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::fs::File;
+use std::hash::Hash;
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -973,7 +974,7 @@ pub struct Circuit {
     #[serde(skip)]
     pub outputs: Vec<usize>,
     #[serde(skip)]
-    tick_count: u64,
+    pub tick_count: u64,
     #[serde(default)]
     wires: Vec<Wire>,
     #[serde(skip)]
@@ -981,7 +982,7 @@ pub struct Circuit {
     //components that change outputs
     //even when inputs haven't changed
     #[serde(skip)]
-    has_dynamic: bool,
+    pub has_dynamic: bool,
 }
 impl Circuit {
     pub fn new(
@@ -1071,12 +1072,15 @@ impl Circuit {
             comp.resize_output();
         }
 
-        let mut ids = HashMap::with_capacity(self.components.len());
+        let mut ids: HashMap<ID, Vec<*const bool>> = HashMap::with_capacity(self.components.len());
         //println!("components: {:?}", (&self.components).as_ptr());
         //so the components are different
         //how are the outputs or inputs copied to the next IC?
         for comp in self.components.iter() {
-            ids.insert(comp.id.clone(), (&comp.outputs) as *const Vec<bool>);
+            ids.insert(
+                comp.id.clone(),
+                (&comp.outputs).iter().map(|b| b as *const bool).collect(),
+            );
         }
         //for (id, r) in &ids {
         //    println!("{}: {:#?}", id.0, r.upgrade().unwrap().as_ptr());
@@ -1092,9 +1096,7 @@ impl Circuit {
                 .find(|comp| comp.id == wire.to.0)
                 .unwrap();
             comp.inputs.push(Input {
-                other_output: ComponentRef::new(
-                    &(unsafe { &**ids.get(&wire.from.0).unwrap() }[wire.from.1]),
-                ),
+                other_output: ComponentRef::new(ids.get(&wire.from.0).unwrap()[wire.from.1]),
                 other_pin: wire.from.1,
                 other_id: wire.from.0.clone(),
                 in_pin: wire.to.1,
@@ -1128,7 +1130,7 @@ impl Circuit {
             }
         }
         for comp in &self.components {
-            if self.check_circular(comp, comp.get_id(), 2) {
+            if self.check_circular(comp, comp.get_id(), 4) {
                 self.has_dynamic = true;
                 return;
             }
@@ -1176,9 +1178,9 @@ impl Circuit {
         {
             comp.set_instance(&self.dependencies, deps_path);
         }
-        self.check_dynamic();
         //coonnect components
         self.connect();
+        self.check_dynamic();
         //println!("wires: {:?}", self.wires);
         self.get_io_indexes_top();
         self.begin = Some(Instant::now());
