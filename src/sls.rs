@@ -138,22 +138,22 @@ pub struct Input {
 }
 impl Debug for Input {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let local_bool;
-        let local_error;
+        //let local_bool;
+        //let local_error;
         f.debug_struct("Input")
-            .field(
-                "other_output",
-                match self.other_output.get() {
-                    Ok(x) => {
-                        local_bool = x;
-                        &local_bool
-                    }
-                    Err(e) => {
-                        local_error = e;
-                        &local_error
-                    }
-                },
-            )
+            //.field(
+            //    "other_output",
+            //    match self.other_output.get() {
+            //        Ok(x) => {
+            //            local_bool = x;
+            //            &local_bool
+            //        }
+            //        Err(e) => {
+            //            local_error = e;
+            //            &local_error
+            //        }
+            //    },
+            //)
             .field("other_pin", &self.other_pin)
             .field("other_id", &self.other_id)
             .field("in_pin", &self.in_pin)
@@ -221,8 +221,12 @@ impl<T: std::clone::Clone> ComponentRef<T> {
     }
     pub fn get(&self) -> Result<T, ComponentInputError> {
         let ptr = unsafe { self.ptr.assume_init() };
-        let val: T = unsafe { &*ptr }.clone();
-        Ok(val)
+        if ptr.is_null() {
+            Err(ComponentInputError::ComponentNotExit)
+        } else {
+            let val: T = unsafe { &*ptr }.clone();
+            Ok(val)
+        }
         //match self.weak.upgrade() {
         //    None => Err(ComponentInputError::ComponentNotExit),
         //    Some(v) => match v.borrow().get(self.index) {
@@ -1077,10 +1081,12 @@ impl Circuit {
         //so the components are different
         //how are the outputs or inputs copied to the next IC?
         for comp in self.components.iter() {
-            ids.insert(
-                comp.id.clone(),
-                (&comp.outputs).iter().map(|b| b as *const bool).collect(),
-            );
+            let mut v:Vec<*const bool> = Vec::with_capacity(comp.outputs.len());
+            for output in comp.outputs.iter() {
+                v.push(output as *const bool);
+            }
+            println!("output {:?}",&v);
+            ids.insert(comp.id.clone(),v);
         }
         //for (id, r) in &ids {
         //    println!("{}: {:#?}", id.0, r.upgrade().unwrap().as_ptr());
@@ -1219,7 +1225,7 @@ impl Circuit {
                             }
                         }
                     }
-                    panic!("{}", e);
+                    panic!("Node errot :( ){}", e);
                 }
                 Ok(b) => {
                     if self.has_dynamic || b {
