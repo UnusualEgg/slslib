@@ -237,6 +237,57 @@ impl<T: std::clone::Clone> ComponentRef<T> {
     }
 }
 
+pub fn get_num_inputs(comp: &Component) -> usize {
+    match comp.node_type {
+        NodeType::INTEGRATED_CIRCUIT => {
+            comp.num_of_in.unwrap()
+        }
+        NodeType::MUX => {
+            let size = comp.size.unwrap();
+            size+size.trailing_zeros() as usize
+        }
+        NodeType::DEMUX => {
+            let size = comp.size.unwrap();
+            1+size.trailing_zeros() as usize
+        }
+
+        NodeType::NOTE |
+        NodeType::CLOCK |
+        NodeType::PULSE_BUTTON | 
+        NodeType::TOGGLE_BUTTON |
+        NodeType::HIGH_CONSTANT |
+        NodeType::LOW_CONSTANT
+        => 0,
+        
+        NodeType::SR_LATCH |
+        NodeType::HALF_ADDER => 2,
+
+        NodeType::AND_GATE |
+        NodeType::NAND_GATE |
+        NodeType::NOR_GATE |
+        NodeType::OR_GATE |
+        NodeType::XOR_GATE |
+        NodeType::XNOR_GATE
+        => comp.gate_num_in.unwrap_or(2),
+
+        NodeType::FULL_ADDER => 3,
+
+        NodeType::T_FLIP_FLOP |
+        NodeType::JK_FLIP_FLOP |
+        NodeType::D_FLIP_FLOP
+        => 4,
+        
+        NodeType::SR_FLIP_FLOP => 3,
+        NodeType::RGB_LIGHT => 3,
+        NodeType::SEVEN_SEGMENT_DISPLAY_DECODER => 4,
+        NodeType::SEVEN_SEGMENT_DISPLAY => 7,
+        NodeType::DOT_MATRIX_DISPLAY_5X7 => 5+7,
+        NodeType::SPEAKER => 14,
+
+        _=>1,
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct Component {
@@ -247,7 +298,7 @@ pub struct Component {
     pub inputs: Vec<Input>,
     //gets from inputs. Used for easier processing.
     #[serde(skip)]
-    pub input_states: Vec<InputState>,
+    pub input_states: Vec<bool>,
     #[serde(skip, default)]
     pub outputs: Vec<bool>,
     #[serde(skip)]
@@ -261,6 +312,8 @@ pub struct Component {
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
+
+    //stuff for IC's
     #[serde(skip_serializing_if = "Option::is_none")]
     uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -270,9 +323,13 @@ pub struct Component {
     #[serde(skip_serializing_if = "Option::is_none")]
     num_of_out: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+
     size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>, //used for NodeType::NOTE
+    #[serde(skip_serializing_if = "Option::is_none",rename="IN")]
+    pub gate_num_in: Option<usize>, //number of inputs marked for gates
+    
 
     #[serde(skip)]
     pub ic_instance: Option<Circuit>,
@@ -392,20 +449,15 @@ impl Component {
             }),
         }
     }
-    fn set_input_state_in_pins(&mut self) {
-        for (i, input) in self.inputs.iter().enumerate() {
-            self.input_states[i].in_pin=input.in_pin;
-        }
-    }
     //returns true if any inputs changed
     fn get_inputs(&mut self) -> Result<bool, NodeError> {
         let mut changed: bool = false;
-        for (i, input) in self.inputs.iter().enumerate() {
+        for input in self.inputs.iter() {
             let state = self.get_input(input)?;
-            let input_state = &mut self.input_states[i];
-            if state != input_state.state {
+            let input_state = &mut self.input_states[input.in_pin];
+            if state != *input_state {
                 changed = true;
-                input_state.state = state;
+                *input_state = state;
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
@@ -422,11 +474,11 @@ impl Component {
         match &self.node_type {
             NodeType::LIGHT_BULB => {
                 for input in &self.input_states {
-                    self.next_outputs[0] = input.state;
+                    self.next_outputs[0] = *input;
                 }
             }
             NodeType::AND_GATE => {
-                let mut out = self.input_states.iter().fold(true, |a,b|a&&b.state);
+                let mut out = self.input_states.iter().fold(true, |a,b|a&&*b);
                 if self.input_states.len() == 0 {
                     out = false;
                 }
@@ -435,70 +487,55 @@ impl Component {
             NodeType::OR_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
-                    out |= input.state;
+                    out |= input;
                 }
                 self.next_outputs[0] = out;
             }
             NodeType::XOR_GATE => {
                 let mut out = true;
                 for input in &self.input_states {
-                    out ^= input.state;
+                    out ^= input;
                 }
                 self.next_outputs[0] = out;
             }
             NodeType::XNOR_GATE => {
                 let mut out = true;
                 for input in &self.input_states {
-                    out ^= input.state;
+                    out ^= input;
                 }
                 self.next_outputs[0] = !out;
             }
             NodeType::NOR_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
-                    out |= input.state;
+                    out |= input;
                 }
                 self.next_outputs[0] = !out;
             }
             NodeType::NOT_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
-                    out = !input.state;
+                    out = !input;
                 }
                 self.next_outputs[0] = out;
             }
             NodeType::BUFFER_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
-                    out = input.state;
+                    out = *input;
                 }
                 self.next_outputs[0] = out;
             }
             NodeType::HALF_ADDER => {
-                let mut a = false;
-                let mut b = false;
-                for input in &self.input_states {
-                    match input.in_pin {
-                        0 => a = input.state,
-                        1 => b = input.state,
-                        _ => (),
-                    }
-                }
+                let a = self.input_states[0];
+                let b = self.input_states[1];
                 self.next_outputs[0] = a ^ b;
                 self.next_outputs[1] = a && b;
             }
             NodeType::FULL_ADDER => {
-                let mut a = false;
-                let mut b = false;
-                let mut c = false;
-                for input in &self.input_states {
-                    match input.in_pin {
-                        0 => a = input.state,
-                        1 => b = input.state,
-                        2 => c = input.state,
-                        _ => (),
-                    }
-                }
+                let a = self.input_states[0];
+                let b = self.input_states[1];
+                let c = self.input_states[2];
                 self.next_outputs[0] = a ^ b ^ c;
                 self.next_outputs[1] = (a && b) || ((a ^ b) && c);
             }
@@ -506,18 +543,10 @@ impl Component {
                 // order is sx-s0 then in
                 let size = self.size.expect("size");
                 let num_addr_pins = size.trailing_zeros() as usize;
-                let mut pins = vec![false; num_addr_pins];
-                let mut on = false;
+                let on = self.input_states[num_addr_pins];
 
-                for input in &self.input_states {
-                    if input.in_pin == num_addr_pins {
-                        on = input.state;
-                    } else {
-                        pins[input.in_pin] = input.state;
-                    }
-                }
                 let mut n = 0;
-                let rev_pins = pins.iter().rev();
+                let rev_pins = self.input_states.iter().take(num_addr_pins).rev();
                 for (i, pin) in rev_pins.enumerate() {
                     n |= *pin as u8 >> i;
                 }
@@ -530,25 +559,17 @@ impl Component {
                 // order is sx-s0 then in
                 let size = self.size.expect("size");
                 let num_addr_pins = size.trailing_zeros() as usize;
-                let mut pins = vec![false; num_addr_pins];
-                let mut input_pins = vec![false; size];
+                let pins = self.input_states.iter().take(num_addr_pins).rev();
+                let mut input_pins = self.input_states.iter().skip(num_addr_pins);
 
-                for input in &self.input_states {
-                    if input.in_pin < num_addr_pins {
-                        pins[input.in_pin] = input.state;
-                    } else {
-                        input_pins[input.in_pin - (num_addr_pins)] = input.state;
-                    }
-                }
-                let mut n = 0;
-                let rev_pins = pins.iter().rev();
-                for (i, pin) in rev_pins.enumerate() {
+                let mut n: u8 = 0;
+                for (i, pin) in pins.enumerate() {
                     n |= *pin as u8 >> i;
                 }
                 for i in &mut self.next_outputs {
                     *i = false;
                 }
-                self.next_outputs[0] = input_pins[n as usize];
+                self.next_outputs[0] = *input_pins.nth(n as usize).unwrap();
             }
             NodeType::CLOCK => {
                 if (tick * 100) % self.period == 0 {
@@ -566,11 +587,11 @@ impl Component {
                     self.label.as_ref().unwrap_or(&"IC".to_string())
                     );
                     */
-                    let out: bool = input.state;
-                    let comp_index: usize = match instance.inputs.get(input.in_pin) {
+                    let out: bool = *input;
+                    let comp_index: usize = match instance.inputs.get(i) {
                         Some(index) => *index,
                         None => {
-                            panic!("IC name:{:?} id:{} failed to get input pin {} because it only has {:?}\ninput: {:#?}",self.label,self.cid.as_ref().unwrap(),input.in_pin,&instance.inputs,&self.inputs[i])
+                            panic!("IC name:{:?} id:{} failed to get input pin {} because it only has {:?}\ninput: {:#?}",self.label,self.cid.as_ref().unwrap(),i,&instance.inputs,&self.inputs[i])
                         }
                     };
                     instance.components[comp_index].next_outputs[0] = out;
@@ -594,30 +615,16 @@ impl Component {
                 //    instance.outputs.len(),
                 //);
                 //println!("{:#?}",&instance.outputs);
-                for i in 0..instance.outputs.len() {
+                for (i,output) in instance.outputs.iter().enumerate() {
                     //println!("get comp {}", instance.outputs[i]);
-                    let comp_index: usize = instance.outputs[i];
+                    let comp_index: usize = *output;
                     //println!("{:?} output",instance.components[comp_index].node_type);
                     self.next_outputs[i] = instance.components[comp_index].next_outputs[0];
                 }
             }
             NodeType::SR_LATCH => {
-                let mut set = false;
-                let mut reset = false;
-                for input in &self.input_states {
-                    let state = input.state;
-                    match input.in_pin {
-                        0 => {
-                            set = state;
-                        }
-                        1 => {
-                            reset = state;
-                        }
-                        n => {
-                            panic!("tried to acess input {} of {:?}", n, self.node_type);
-                        }
-                    }
-                }
+                let set = self.input_states[0];
+                let reset = self.input_states[1];
                 match (set, reset) {
                     (true, false) => {
                         self.next_outputs[0] = true;
@@ -640,30 +647,10 @@ impl Component {
                     self.next_outputs[1] = true; //~Q
                 }
 
-                let mut preset: bool = false;
-                let mut t: bool = false;
-                let mut clock: bool = false;
-                let mut clear: bool = false;
-                for input in &self.input_states {
-                    let state = input.state;
-                    match input.in_pin {
-                        0 => {
-                            preset = state;
-                        }
-                        1 => {
-                            t = state;
-                        }
-                        2 => {
-                            clock = state;
-                        }
-                        3 => {
-                            clear = state;
-                        }
-                        n => {
-                            panic!("tried to acess input {} of T_FLIP_FLOP", n);
-                        }
-                    }
-                }
+                let preset: bool = self.input_states[0];
+                let t: bool = self.input_states[1];
+                let clock: bool = self.input_states[2];
+                let clear: bool = self.input_states[3];
                 match (preset, clear) {
                     (false, false) => {
                         (self.next_outputs[0], self.next_outputs[1]) = (false, true);
@@ -690,31 +677,11 @@ impl Component {
                 self.rising_edge_prev = clock;
             }
             NodeType::D_FLIP_FLOP => {
-                let mut data: bool = false;
-                let mut clock: bool = false;
-                let mut set: bool = false;
-                let mut reset: bool = false;
                 //for some reason out of order
-                for input in &self.input_states {
-                    let state = input.state;
-                    match input.in_pin {
-                        0 => {
-                            set = state;
-                        }
-                        1 => {
-                            reset = state;
-                        }
-                        2 => {
-                            data = state;
-                        }
-                        3 => {
-                            clock = state;
-                        }
-                        n => {
-                            panic!("tried to acess input {} of D_FLIP_FLOP", n);
-                        }
-                    }
-                }
+                let set: bool = self.input_states[0];
+                let reset: bool = self.input_states[1];
+                let data: bool = self.input_states[2];
+                let clock: bool = self.input_states[3];
                 match (set, reset) {
                     (false, false) => {
                         (self.next_outputs[0], self.next_outputs[1]) = (false, true);
@@ -1110,8 +1077,7 @@ impl Circuit {
         }
         for comp in &mut self.components {
             comp.input_states
-                .resize(comp.inputs.len(), InputState::default());
-            comp.set_input_state_in_pins();
+                .resize(get_num_inputs(comp), false);
             //println!(
             //    "resizing({:?}): input_states: {:?} inputs:{:?}",
             //    &comp.node_type, &comp.input_states, &comp.inputs
