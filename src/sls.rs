@@ -1086,7 +1086,6 @@ impl Circuit {
             for output in comp.outputs.iter() {
                 v.push(output as *const bool);
             }
-            println!("output {:?}",&v);
             ids.insert(comp.id.clone(),v);
         }
         //for (id, r) in &ids {
