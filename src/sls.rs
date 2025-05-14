@@ -392,6 +392,11 @@ impl Component {
             }),
         }
     }
+    fn set_input_state_in_pins(&mut self) {
+        for (i, input) in self.inputs.iter().enumerate() {
+            self.input_states[i].in_pin=input.in_pin;
+        }
+    }
     //returns true if any inputs changed
     fn get_inputs(&mut self) -> Result<bool, NodeError> {
         let mut changed: bool = false;
@@ -400,7 +405,6 @@ impl Component {
             let input_state = &mut self.input_states[i];
             if state != input_state.state {
                 changed = true;
-                input_state.in_pin = input.in_pin;
                 input_state.state = state;
             }
         }
@@ -422,10 +426,7 @@ impl Component {
                 }
             }
             NodeType::AND_GATE => {
-                let mut out = true;
-                for input in &self.input_states {
-                    out &= input.state;
-                }
+                let mut out = self.input_states.iter().fold(true, |a,b|a&&b.state);
                 if self.input_states.len() == 0 {
                     out = false;
                 }
@@ -1111,6 +1112,7 @@ impl Circuit {
         for comp in &mut self.components {
             comp.input_states
                 .resize(comp.inputs.len(), InputState::default());
+            comp.set_input_state_in_pins();
             //println!(
             //    "resizing({:?}): input_states: {:?} inputs:{:?}",
             //    &comp.node_type, &comp.input_states, &comp.inputs
