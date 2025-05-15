@@ -194,6 +194,8 @@ impl std::error::Error for NodeError {}
 pub struct ComponentRef<T: Clone> {
     pub ptr: MaybeUninit<*const T>,
 }
+unsafe impl<T:Clone> Send for ComponentRef<T> {}
+unsafe  impl<T:Clone> Sync for ComponentRef<T> {}
 impl<T: Clone> Default for ComponentRef<T> {
     fn default() -> Self {
         Self {
@@ -450,21 +452,27 @@ impl Component {
         }
     }
     //returns true if any inputs changed
-    fn get_inputs(&mut self) -> Result<bool, NodeError> {
-        let mut changed: bool = false;
+    fn get_inputs(&mut self,force:bool) -> Result<bool, NodeError> {
+        let mut changed: bool = force;
         for input in self.inputs.iter() {
+            let input_state = self.input_states[input.in_pin];
             let state = self.get_input(input)?;
-            let input_state = &mut self.input_states[input.in_pin];
-            if state != *input_state {
+            if state != input_state {
+                println!("{} {input_state} {state}",self.node_type.to_string());
                 changed = true;
-                *input_state = state;
+                self.input_states[input.in_pin] = state;
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
             let instance: &mut Circuit = self.ic_instance.as_mut().unwrap();
-            if instance.has_dynamic || changed {
+            //TODO remove this true 
+            if instance.has_dynamic || changed || instance.comps_changed ||true {
                 for comp in &mut instance.components {
-                    comp.get_inputs()?;
+                    instance.comps_changed=false;
+                    if comp.get_inputs(force)? {
+                        changed=true;
+                        instance.comps_changed=true;
+                    }
                 }
             }
         }
@@ -643,9 +651,9 @@ impl Component {
             }
             NodeType::T_FLIP_FLOP => {
                 //Q and ~Q
-                if !self.next_outputs[0] && !self.next_outputs[1] {
-                    self.next_outputs[1] = true; //~Q
-                }
+                // if !self.next_outputs[0] && !self.next_outputs[1] {
+                //     self.next_outputs[1] = true; //~Q
+                // }
 
                 let preset: bool = self.input_states[0];
                 let t: bool = self.input_states[1];
@@ -955,6 +963,8 @@ pub struct Circuit {
     //even when inputs haven't changed
     #[serde(skip)]
     pub has_dynamic: bool,
+    #[serde(skip)]
+    pub comps_changed: bool,
 }
 impl Circuit {
     pub fn new(
@@ -1085,6 +1095,7 @@ impl Circuit {
         }
     }
     fn check_dynamic(&mut self) {
+        // self.has_dynamic=true;
         for comp in &mut self.components {
             match comp.node_type {
                 NodeType::CLOCK => {
@@ -1172,12 +1183,13 @@ impl Circuit {
         //coonnect components
         self.connect();
         //println!("wires: {:?}", self.wires);
+        self.check_dynamic();
         self.get_io_indexes();
     }
     //1 tick = 100 ms
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self,force:bool) {
         for i in 0..self.components.len() {
-            match self.components[i].get_inputs() {
+            match self.components[i].get_inputs(force) {
                 Err(e) => {
                     eprintln!("Input Error!");
                     match &e.t {
@@ -1195,7 +1207,10 @@ impl Circuit {
                     panic!("Node errot :( ){}", e);
                 }
                 Ok(b) => {
-                    if self.has_dynamic || b {
+                    if b {
+                        self.comps_changed=true;
+                    }
+                    if self.has_dynamic || self.comps_changed || force {
                         self.components[i].next_output(self.tick_count);
                     }
                 }
