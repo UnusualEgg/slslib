@@ -458,22 +458,22 @@ impl Component {
             let input_state = self.input_states[input.in_pin];
             let state = self.get_input(input)?;
             if state != input_state {
-                println!("{} {input_state} {state}",self.node_type.to_string());
+                //println!("{} {input_state} {state}",self.node_type.to_string());
                 changed = true;
                 self.input_states[input.in_pin] = state;
             }
         }
         if self.node_type == NodeType::INTEGRATED_CIRCUIT {
             let instance: &mut Circuit = self.ic_instance.as_mut().unwrap();
-            //TODO remove this true 
-            if instance.has_dynamic || changed || instance.comps_changed ||true {
+            if instance.has_dynamic || changed || instance.comps_changed {
+                let mut comps_changed=false;
                 for comp in &mut instance.components {
-                    instance.comps_changed=false;
                     if comp.get_inputs(force)? {
                         changed=true;
-                        instance.comps_changed=true;
+                        comps_changed=true;
                     }
                 }
+                instance.comps_changed=comps_changed;
             }
         }
         Ok(changed)
@@ -602,6 +602,10 @@ impl Component {
                             panic!("IC name:{:?} id:{} failed to get input pin {} because it only has {:?}\ninput: {:#?}",self.label,self.cid.as_ref().unwrap(),i,&instance.inputs,&self.inputs[i])
                         }
                     };
+                    let prev = instance.components[comp_index].next_outputs[0];
+                    if prev!=out {
+                        instance.comps_changed=true;
+                    }
                     instance.components[comp_index].next_outputs[0] = out;
                     /*
                     println!(
@@ -610,8 +614,10 @@ impl Component {
                     );
                     */
                 }
-                for comp in &mut instance.components {
-                    comp.next_output(tick);
+                if instance.comps_changed||instance.has_dynamic {
+                    for comp in &mut instance.components {
+                        comp.next_output(tick);
+                    }
                 }
                 //set next out based on inner IC
                 //println!("we are {:?}({}) {:?}",self.node_type,self.label.as_ref().unwrap(),instance.header.id);
