@@ -303,8 +303,6 @@ pub struct Component {
     pub input_states: Vec<bool>,
     #[serde(skip, default)]
     pub outputs: Vec<bool>,
-    #[serde(skip)]
-    pub next_outputs: Vec<bool>,
     #[serde(skip, default)]
     rising_edge_prev: bool, //used to detect rising edge inputs
     id: ID,
@@ -418,7 +416,6 @@ impl Component {
         };
         let outputs = &mut self.outputs;
         outputs.resize(output_n, false);
-        self.next_outputs.resize(output_n, false);
         match self.node_type {
             NodeType::D_FLIP_FLOP
             | NodeType::SR_LATCH
@@ -427,16 +424,12 @@ impl Component {
             | NodeType::T_FLIP_FLOP => {
                 outputs[0] = false;
                 outputs[1] = true;
-                self.next_outputs[0] = false;
-                self.next_outputs[1] = true;
             }
             NodeType::HIGH_CONSTANT => {
                 outputs[0] = true;
-                self.next_outputs[0] = true;
             }
             NodeType::LOW_CONSTANT => {
                 outputs[0] = false;
-                self.next_outputs[0] = false;
             }
             _ => {}
         }
@@ -482,7 +475,7 @@ impl Component {
         match &self.node_type {
             NodeType::LIGHT_BULB => {
                 for input in &self.input_states {
-                    self.next_outputs[0] = *input;
+                    self.outputs[0] = *input;
                 }
             }
             NodeType::AND_GATE => {
@@ -490,62 +483,62 @@ impl Component {
                 if self.input_states.len() == 0 {
                     out = false;
                 }
-                self.next_outputs[0] = out;
+                self.outputs[0] = out;
             }
             NodeType::OR_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
                     out |= input;
                 }
-                self.next_outputs[0] = out;
+                self.outputs[0] = out;
             }
             NodeType::XOR_GATE => {
                 let mut out = true;
                 for input in &self.input_states {
                     out ^= input;
                 }
-                self.next_outputs[0] = out;
+                self.outputs[0] = out;
             }
             NodeType::XNOR_GATE => {
                 let mut out = true;
                 for input in &self.input_states {
                     out ^= input;
                 }
-                self.next_outputs[0] = !out;
+                self.outputs[0] = !out;
             }
             NodeType::NOR_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
                     out |= input;
                 }
-                self.next_outputs[0] = !out;
+                self.outputs[0] = !out;
             }
             NodeType::NOT_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
                     out = !input;
                 }
-                self.next_outputs[0] = out;
+                self.outputs[0] = out;
             }
             NodeType::BUFFER_GATE => {
                 let mut out = false;
                 for input in &self.input_states {
                     out = *input;
                 }
-                self.next_outputs[0] = out;
+                self.outputs[0] = out;
             }
             NodeType::HALF_ADDER => {
                 let a = self.input_states[0];
                 let b = self.input_states[1];
-                self.next_outputs[0] = a ^ b;
-                self.next_outputs[1] = a && b;
+                self.outputs[0] = a ^ b;
+                self.outputs[1] = a && b;
             }
             NodeType::FULL_ADDER => {
                 let a = self.input_states[0];
                 let b = self.input_states[1];
                 let c = self.input_states[2];
-                self.next_outputs[0] = a ^ b ^ c;
-                self.next_outputs[1] = (a && b) || ((a ^ b) && c);
+                self.outputs[0] = a ^ b ^ c;
+                self.outputs[1] = (a && b) || ((a ^ b) && c);
             }
             NodeType::DEMUX => {
                 // order is sx-s0 then in
@@ -558,10 +551,10 @@ impl Component {
                 for (i, pin) in rev_pins.enumerate() {
                     n |= *pin as u8 >> i;
                 }
-                for i in &mut self.next_outputs {
+                for i in &mut self.outputs {
                     *i = false;
                 }
-                self.next_outputs[n as usize] = on;
+                self.outputs[n as usize] = on;
             }
             NodeType::MUX => {
                 // order is sx-s0 then in
@@ -574,14 +567,14 @@ impl Component {
                 for (i, pin) in pins.enumerate() {
                     n |= *pin as u8 >> i;
                 }
-                for i in &mut self.next_outputs {
+                for i in &mut self.outputs {
                     *i = false;
                 }
-                self.next_outputs[0] = *input_pins.nth(n as usize).unwrap();
+                self.outputs[0] = *input_pins.nth(n as usize).unwrap();
             }
             NodeType::CLOCK => {
                 if (tick * 100) % self.period == 0 {
-                    self.next_outputs[0] = !self.next_outputs[0];
+                    self.outputs[0] = !self.outputs[0];
                 }
             }
             NodeType::INTEGRATED_CIRCUIT => {
@@ -602,11 +595,11 @@ impl Component {
                             panic!("IC name:{:?} id:{} failed to get input pin {} because it only has {:?}\ninput: {:#?}",self.label,self.cid.as_ref().unwrap(),i,&instance.inputs,&self.inputs[i])
                         }
                     };
-                    let prev = instance.components[comp_index].next_outputs[0];
+                    let prev = instance.components[comp_index].outputs[0];
                     if prev!=out {
                         instance.comps_changed=true;
                     }
-                    instance.components[comp_index].next_outputs[0] = out;
+                    instance.components[comp_index].outputs[0] = out;
                     /*
                     println!(
                     "next_output {:?}\tset to {} from {}",
@@ -633,7 +626,7 @@ impl Component {
                     //println!("get comp {}", instance.outputs[i]);
                     let comp_index: usize = *output;
                     //println!("{:?} output",instance.components[comp_index].node_type);
-                    self.next_outputs[i] = instance.components[comp_index].next_outputs[0];
+                    self.outputs[i] = instance.components[comp_index].outputs[0];
                 }
             }
             NodeType::SR_LATCH => {
@@ -641,16 +634,16 @@ impl Component {
                 let reset = self.input_states[1];
                 match (set, reset) {
                     (true, false) => {
-                        self.next_outputs[0] = true;
-                        self.next_outputs[1] = false;
+                        self.outputs[0] = true;
+                        self.outputs[1] = false;
                     }
                     (false, true) => {
-                        self.next_outputs[0] = false;
-                        self.next_outputs[1] = true;
+                        self.outputs[0] = false;
+                        self.outputs[1] = true;
                     }
                     (true, true) => {
-                        self.next_outputs[0] = true;
-                        self.next_outputs[1] = false;
+                        self.outputs[0] = true;
+                        self.outputs[1] = false;
                     }
                     (false, false) => {}
                 }
@@ -667,21 +660,21 @@ impl Component {
                 let clear: bool = self.input_states[3];
                 match (preset, clear) {
                     (false, false) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (false, true);
+                        (self.outputs[0], self.outputs[1]) = (false, true);
                     }
                     (true, false) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (false, true);
+                        (self.outputs[0], self.outputs[1]) = (false, true);
                     }
                     (false, true) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (true, false);
+                        (self.outputs[0], self.outputs[1]) = (true, false);
                     }
                     (true, true) => {
                         match t {
                             true => {
                                 if !self.rising_edge_prev && clock {
                                     //on rising edge of clock
-                                    (self.next_outputs[0], self.next_outputs[1]) =
-                                        (self.next_outputs[1], self.next_outputs[0]);
+                                    (self.outputs[0], self.outputs[1]) =
+                                        (self.outputs[1], self.outputs[0]);
                                 }
                             }
                             false => (),
@@ -698,19 +691,19 @@ impl Component {
                 let clock: bool = self.input_states[3];
                 match (set, reset) {
                     (false, false) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (false, true);
+                        (self.outputs[0], self.outputs[1]) = (false, true);
                     }
                     (true, false) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (false, true);
+                        (self.outputs[0], self.outputs[1]) = (false, true);
                     }
                     (false, true) => {
-                        (self.next_outputs[0], self.next_outputs[1]) = (true, false);
+                        (self.outputs[0], self.outputs[1]) = (true, false);
                     }
                     (true, true) => {
                         if !self.rising_edge_prev && clock {
                             //on rising edge of clock
-                            self.next_outputs[0] = data;
-                            self.next_outputs[1] = !data;
+                            self.outputs[0] = data;
+                            self.outputs[1] = !data;
                         }
                     }
                 }
@@ -725,18 +718,6 @@ impl Component {
             NodeType::HIGH_CONSTANT | NodeType::LOW_CONSTANT => {}
             _ => {
                 todo!("{:?}", &self.node_type);
-            }
-        }
-    }
-    fn update_output(&mut self) {
-        //self.outputs.borrow_mut().clone_from(&self.next_outputs);
-        let outputs = &mut self.outputs;
-        for (i, output) in self.next_outputs.iter().enumerate() {
-            outputs[i] = *output;
-        }
-        if let Some(instance) = &mut self.ic_instance.as_mut() {
-            for comp in &mut instance.components {
-                comp.update_output();
             }
         }
     }
@@ -1216,14 +1197,13 @@ impl Circuit {
                     if b {
                         self.comps_changed=true;
                     }
-                    if self.has_dynamic || self.comps_changed || force {
-                        self.components[i].next_output(self.tick_count);
-                    }
                 }
             }
         }
         for component in &mut self.components {
-            component.update_output();
+            if self.has_dynamic || self.comps_changed || force {
+                component.next_output(self.tick_count);
+            }
         }
         self.tick_count += 1;
     }
