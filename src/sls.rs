@@ -710,7 +710,33 @@ impl Component {
                 self.rising_edge_prev = clock;
             }
             NodeType::SEVEN_SEGMENT_DISPLAY_DECODER => {
-                //not gonna actually simulate, just gonna show input number
+                let n = 
+                    (self.input_states[0] as u8)<<3 |
+                    (self.input_states[1] as u8)<<2 |
+                    (self.input_states[2] as u8)<<1 |
+                    (self.input_states[3] as u8)<<0;
+                let output=match n {
+                    0 => [true,true,true,true,true,true,false],
+                    1 => [false,true,true,false,false,false,false],
+                    2 => [true,true,false,true,true,false,true],
+                    3 => [true,true,true,true,false,false,true],
+                    4 => [false,true,true,false,false,true,true],
+                    5 => [true,false,true,true,false,true,true],
+                    6 => [true,false,true,true,true,true,true],
+                    7 => [true,true,true,false,false,false,false],
+                    8 => [true,true,true,true,true,true,true],
+                    9 => [true,true,true,true,false,true,true],
+                    0xA => [true,true,true,false,true,true,true],
+                    0xB => [false,false,true,true,true,true,true],
+                    0xC => [true,false,false,true,true,true,false],
+                    0xD => [false,true,true,true,true,false,true],
+                    0xE => [true,false,false,true,true,true,true],
+                    0xF => [true,false,false,false,true,true,true],
+                    _=>unreachable!(),
+                };
+                for (i,out) in output.iter().enumerate() {
+                    self.outputs[i]=*out;
+                }
             }
             NodeType::SEVEN_SEGMENT_DISPLAY => {}
             NodeType::NOTE => {}
