@@ -1175,7 +1175,7 @@ impl Circuit {
         {
             comp.set_instance(&self.dependencies, deps_path);
         }
-        //coonnect components
+        //connect components
         self.connect();
         self.check_dynamic();
         //println!("wires: {:?}", self.wires);
