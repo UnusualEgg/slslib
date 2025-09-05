@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
 use std::usize;
+use rayon::prelude::*;
 
 #[allow(non_camel_case_types)]
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Copy, Default)]
@@ -546,11 +547,10 @@ impl Component {
                 let num_addr_pins = size.trailing_zeros() as usize;
                 let on = self.input_states[num_addr_pins];
 
-                let mut n = 0;
-                let rev_pins = self.input_states.iter().take(num_addr_pins).rev();
-                for (i, pin) in rev_pins.enumerate() {
-                    n |= *pin as u8 >> i;
-                }
+                let n = self.input_states.iter().take(num_addr_pins).rev().enumerate()
+                .fold(0, |n,(i,pin)|{
+                    n | ((*pin as u8) << i)
+                });
                 for i in &mut self.outputs {
                     *i = false;
                 }
@@ -1200,11 +1200,11 @@ impl Circuit {
                 }
             }
         }
-        for component in &mut self.components {
+        (&mut self.components).into_par_iter().for_each(|component| {
             if self.has_dynamic || self.comps_changed || force {
                 component.next_output(self.tick_count);
             }
-        }
+        });
         self.tick_count += 1;
     }
     fn sort_comps(&mut self) {
