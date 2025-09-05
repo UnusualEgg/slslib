@@ -1193,7 +1193,7 @@ impl Circuit {
         {
             comp.set_instance(dependencies, deps_path);
         }
-        //coonnect components
+        //connect components
         self.connect();
         //println!("wires: {:?}", self.wires);
         self.check_dynamic();
